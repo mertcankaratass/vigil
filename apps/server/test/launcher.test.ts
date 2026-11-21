@@ -57,5 +57,6 @@ describe("Windows launcher (#263)", () => {
     const script = readFileSync(startBatPath, "utf-8");
     expect(script).toContain("docker compose up");
     expect(script).toContain("start http://127.0.0.1:3000");
+    expect(script).toContain("if ($ready) { exit 0 } else { exit 1 }");
   });
 });

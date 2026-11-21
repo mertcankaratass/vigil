@@ -71,7 +71,7 @@ if %ERRORLEVEL% neq 0 (
 rem 5. Wait for web service to be ready
 echo Servislerin hazir olmasi bekleniyor / Waiting for Vigil to be ready...
 powershell -NoProfile -Command ^
-  "$ready = $false; for ($i=0; $i -lt 30; $i++) { try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:3000' -UseBasicParsing -TimeoutSec 1; if ($r.StatusCode -eq 200) { $ready = $true; break } } catch {}; Start-Sleep -Seconds 1 }; exit ($ready ? 0 : 1)" >nul 2>nul
+  "$ready = $false; for ($i=0; $i -lt 30; $i++) { try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:3000' -UseBasicParsing -TimeoutSec 1; if ($r.StatusCode -eq 200) { $ready = $true; break } } catch {}; Start-Sleep -Seconds 1 }; if ($ready) { exit 0 } else { exit 1 }" >nul 2>nul
 
 rem 6. Open browser
 start http://127.0.0.1:3000
