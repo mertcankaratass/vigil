@@ -316,3 +316,164 @@ export function threeMonthGrossMargin(filing: ParsedFiling): ThreeMonthGrossMarg
   const prior_year = margin(columns.prior_year);
   return { current, prior_year, change_points: marginChangePoints(current, prior_year), columns };
 }
+
+export interface MonetaryAndFinanceExpense {
+  /** Net monetary position gain (loss) under TMS 29 (IAS 29). Pre-tax amount (income statement row 52). */
+  net_monetary_position: Result<bigint>;
+  /** Finance expense (income statement row 51). */
+  finance_expense: Result<bigint>;
+  /** Net finance expense / income (finance_income + finance_expense) when finance income is provided. */
+  net_finance_expense?: Result<bigint>;
+}
+
+export interface MonetaryAndFinanceExpenseInputs {
+  net_monetary_position?: Input<bigint>;
+  finance_expense?: Input<bigint>;
+  finance_income?: Input<bigint>;
+}
+
+/**
+ * Report net monetary position (TMS 29) together with finance expense side by side (#64, docs/VIGIL.md §6 rule 8, §7).
+ * Rule: net monetary position is pre-tax and can swing hard; it is not removed, it is read together with finance expense.
+ * Amounts are `bigint`; a missing input gives not computable (#65), never 0.
+ */
+export function monetaryAndFinanceExpense(inputs: MonetaryAndFinanceExpenseInputs): MonetaryAndFinanceExpense;
+export function monetaryAndFinanceExpense(
+  netMonetaryPosition: Input<bigint>,
+  financeExpense: Input<bigint>,
+  financeIncome?: Input<bigint>,
+): MonetaryAndFinanceExpense;
+export function monetaryAndFinanceExpense(
+  first: Input<bigint> | MonetaryAndFinanceExpenseInputs,
+  second?: Input<bigint>,
+  third?: Input<bigint>,
+): MonetaryAndFinanceExpense {
+  let netMonetary: Input<bigint>;
+  let finExpense: Input<bigint>;
+  let finIncome: Input<bigint> | undefined;
+
+  if (
+    typeof first === "object" &&
+    first !== null &&
+    !("status" in first) &&
+    ("net_monetary_position" in first || "finance_expense" in first || "finance_income" in first)
+  ) {
+    const inputs = first as MonetaryAndFinanceExpenseInputs;
+    netMonetary = inputs.net_monetary_position;
+    finExpense = inputs.finance_expense;
+    finIncome = inputs.finance_income;
+  } else {
+    netMonetary = first as Input<bigint>;
+    finExpense = second;
+    finIncome = third;
+  }
+
+  const check = (code: string, input: Input<bigint>): Result<bigint> => {
+    const c = collect({ [code]: input });
+    if (!("values" in c)) return c;
+    return ok(c.values[code] as bigint);
+  };
+
+  const mon = check("net_monetary_position", netMonetary);
+  const exp = check("finance_expense", finExpense);
+
+  const out: MonetaryAndFinanceExpense = {
+    net_monetary_position: mon,
+    finance_expense: exp,
+  };
+
+  if (finIncome !== undefined) {
+    const inc = check("finance_income", finIncome);
+    const net = collect({ finance_income: inc, finance_expense: exp });
+    out.net_finance_expense = "values" in net ? ok(net.values.finance_income + net.values.finance_expense) : net;
+  }
+
+  return out;
+}
+
+export interface PeriodMonetaryAndFinanceExpense extends MonetaryAndFinanceExpense {
+  column_class: string;
+  period_type: string;
+  period_label: string;
+  period_start: string | null;
+  period_end: string | null;
+}
+
+const NET_MONETARY_ROW = 52;
+const FINANCE_EXPENSE_ROW = 51;
+const FINANCE_INCOME_ROW = 50;
+
+/**
+ * Net monetary position and finance expense for every period reported in an income statement (#64).
+ * General template filings report both lines under rows 52 and 51 of roles 310003, 310000, 310002.
+ * Other templates return "not applicable" for each period.
+ */
+export function monetaryAndFinanceExpenseByPeriod(filing: ParsedFiling): PeriodMonetaryAndFinanceExpense[] {
+  if (filing.template_family !== "general") {
+    const na = notComputable(
+      "not_applicable",
+      `Parasal pozisyon ve finansman giderleri ${filing.template_family} şablonunda tanımlı değil.`,
+    );
+    const cols = new Map<
+      string,
+      { period_type: string; period_label: string; period_start: string | null; period_end: string | null }
+    >();
+    for (const f of filing.facts) {
+      if (!cols.has(f.column_class)) {
+        cols.set(f.column_class, {
+          period_type: f.period_type,
+          period_label: f.period_label,
+          period_start: f.period_start,
+          period_end: f.period_end,
+        });
+      }
+    }
+    return [...cols.entries()].map(([col, info]) => ({
+      column_class: col,
+      ...info,
+      net_monetary_position: na,
+      finance_expense: na,
+    }));
+  }
+
+  const role = INCOME_STATEMENT_ROLES.find((r) => filing.role_codes.includes(r));
+  if (!role) return [];
+
+  // Group facts by column class to find every period reported in this statement
+  const columns = new Map<
+    string,
+    { period_type: string; period_label: string; period_start: string | null; period_end: string | null }
+  >();
+  for (const f of filing.facts) {
+    if (f.role_code === role && !columns.has(f.column_class)) {
+      columns.set(f.column_class, {
+        period_type: f.period_type,
+        period_label: f.period_label,
+        period_start: f.period_start,
+        period_end: f.period_end,
+      });
+    }
+  }
+
+  const out: PeriodMonetaryAndFinanceExpense[] = [];
+  for (const [col, info] of columns.entries()) {
+    const rows = rowValues(filing, role, col);
+    const monVal = rows.get(NET_MONETARY_ROW);
+    const expVal = rows.get(FINANCE_EXPENSE_ROW);
+    const incVal = rows.get(FINANCE_INCOME_ROW);
+
+    const pair = monetaryAndFinanceExpense({
+      net_monetary_position: monVal === undefined ? notReported() : ok(monVal),
+      finance_expense: expVal === undefined ? notReported() : ok(expVal),
+      finance_income: incVal === undefined ? undefined : ok(incVal),
+    });
+
+    out.push({
+      column_class: col,
+      ...info,
+      ...pair,
+    });
+  }
+
+  return out;
+}

@@ -7,6 +7,8 @@ import {
   cashRatio,
   currentRatio,
   liabilitiesToAssets,
+  monetaryAndFinanceExpense,
+  monetaryAndFinanceExpenseByPeriod,
   netDebt,
   netDebtToEquity,
   notReported,
@@ -15,6 +17,7 @@ import {
   quickRatio,
   type Result,
 } from "../src/index.ts";
+import { fact, filing } from "./helpers.ts";
 
 const katmr2026 = {
   cash: 120.8,
@@ -214,5 +217,159 @@ describe("pyRound matches Python's round()", () => {
     [0.215429998603807, 6, 0.21543],
   ])("round(%p, %p) = %p", (x, n, expected) => {
     expect(pyRound(x, n)).toBe(expected);
+  });
+});
+
+describe("net monetary position and finance expense (#64)", () => {
+  test("KATMR worked example from docs/VIGIL.md §7: exposes both side by side", () => {
+    // 6A 2026: net monetary position 60.0 mn TL, finance (net) -188.9 mn TL
+    const katmr2026 = monetaryAndFinanceExpense(60_000_000n, -188_900_000n);
+    expect(katmr2026.net_monetary_position).toEqual(ok(60_000_000n));
+    expect(katmr2026.finance_expense).toEqual(ok(-188_900_000n));
+
+    // 6A 2025: net monetary position 145.5 mn TL, finance (net) -168.3 mn TL
+    const katmr2025 = monetaryAndFinanceExpense(145_500_000n, -168_300_000n);
+    expect(katmr2025.net_monetary_position).toEqual(ok(145_500_000n));
+    expect(katmr2025.finance_expense).toEqual(ok(-168_300_000n));
+  });
+
+  test("KATMR Q1/Q2 swing mentioned in context: net monetary position swings but is kept with finance expense", () => {
+    // Q1 2026: +320.2 mn TL
+    const q1 = monetaryAndFinanceExpense(320_200_000n, -95_000_000n);
+    expect(q1.net_monetary_position).toEqual(ok(320_200_000n));
+    expect(q1.finance_expense).toEqual(ok(-95_000_000n));
+
+    // Q2 2026 (standalone): -260.2 mn TL
+    const q2 = monetaryAndFinanceExpense(-260_200_000n, -93_900_000n);
+    expect(q2.net_monetary_position).toEqual(ok(-260_200_000n));
+    expect(q2.finance_expense).toEqual(ok(-93_900_000n));
+  });
+
+  test("missing input gives not computable (#65), never 0 or fallback", () => {
+    // Missing net monetary position
+    const noMon = monetaryAndFinanceExpense(null, -188_900_000n);
+    expect(noMon.net_monetary_position).toMatchObject({
+      status: "not_computable",
+      reason: { code: "missing_input", needs: ["net_monetary_position"] },
+    });
+    expect(noMon.finance_expense).toEqual(ok(-188_900_000n));
+
+    // Missing finance expense
+    const noExp = monetaryAndFinanceExpense(60_000_000n, undefined);
+    expect(noExp.net_monetary_position).toEqual(ok(60_000_000n));
+    expect(noExp.finance_expense).toMatchObject({
+      status: "not_computable",
+      reason: { code: "missing_input", needs: ["finance_expense"] },
+    });
+
+    // Both missing or not reported
+    const bothMissing = monetaryAndFinanceExpense(notReported(), notReported());
+    expect(bothMissing.net_monetary_position).toMatchObject({
+      status: "not_computable",
+      reason: { code: "missing_input", needs: ["net_monetary_position"] },
+    });
+    expect(bothMissing.finance_expense).toMatchObject({
+      status: "not_computable",
+      reason: { code: "missing_input", needs: ["finance_expense"] },
+    });
+
+    // Zero is a valid amount, not missing
+    const zero = monetaryAndFinanceExpense(0n, 0n);
+    expect(zero.net_monetary_position).toEqual(ok(0n));
+    expect(zero.finance_expense).toEqual(ok(0n));
+  });
+
+  test("accepts input object form as well", () => {
+    const res = monetaryAndFinanceExpense({
+      net_monetary_position: 60_000_000n,
+      finance_expense: -188_900_000n,
+    });
+    expect(res.net_monetary_position).toEqual(ok(60_000_000n));
+    expect(res.finance_expense).toEqual(ok(-188_900_000n));
+  });
+
+  test("monetaryAndFinanceExpenseByPeriod extracts both lines for every period in a filing", () => {
+    const f = filing({
+      template_family: "general",
+      role_codes: ["310003"],
+      facts: [
+        fact({
+          role_code: "310003",
+          row_id: "general_role_310003-row-52",
+          column_class: "col-order-class-4",
+          period_type: "YTD_CUMULATIVE",
+          period_label: "01.01.2026 - 30.06.2026",
+          period_start: "2026-01-01",
+          period_end: "2026-06-30",
+          normalized_value_tl: 60_000_000n,
+        }),
+        fact({
+          role_code: "310003",
+          row_id: "general_role_310003-row-51",
+          column_class: "col-order-class-4",
+          period_type: "YTD_CUMULATIVE",
+          period_label: "01.01.2026 - 30.06.2026",
+          period_start: "2026-01-01",
+          period_end: "2026-06-30",
+          normalized_value_tl: -188_900_000n,
+        }),
+        fact({
+          role_code: "310003",
+          row_id: "general_role_310003-row-52",
+          column_class: "col-order-class-5",
+          period_type: "YTD_CUMULATIVE",
+          period_label: "01.01.2025 - 30.06.2025",
+          period_start: "2025-01-01",
+          period_end: "2025-06-30",
+          normalized_value_tl: 145_500_000n,
+        }),
+        fact({
+          role_code: "310003",
+          row_id: "general_role_310003-row-51",
+          column_class: "col-order-class-5",
+          period_type: "YTD_CUMULATIVE",
+          period_label: "01.01.2025 - 30.06.2025",
+          period_start: "2025-01-01",
+          period_end: "2025-06-30",
+          normalized_value_tl: -168_300_000n,
+        }),
+      ],
+    });
+
+    const periods = monetaryAndFinanceExpenseByPeriod(f);
+    expect(periods).toHaveLength(2);
+
+    const c4 = periods.find((p) => p.column_class === "col-order-class-4");
+    expect(c4?.net_monetary_position).toEqual(ok(60_000_000n));
+    expect(c4?.finance_expense).toEqual(ok(-188_900_000n));
+
+    const c5 = periods.find((p) => p.column_class === "col-order-class-5");
+    expect(c5?.net_monetary_position).toEqual(ok(145_500_000n));
+    expect(c5?.finance_expense).toEqual(ok(-168_300_000n));
+  });
+
+  test("non-general template returns not applicable for each period", () => {
+    const f = filing({
+      template_family: "banks",
+      role_codes: ["310017"],
+      facts: [
+        fact({
+          role_code: "310017",
+          row_id: "banks_role_310017-row-4",
+          column_class: "col-order-class-4",
+          period_type: "YTD_CUMULATIVE",
+          period_label: "01.01.2026 - 30.06.2026",
+          period_start: "2026-01-01",
+          period_end: "2026-06-30",
+          normalized_value_tl: 100_000n,
+        }),
+      ],
+    });
+    const periods = monetaryAndFinanceExpenseByPeriod(f);
+    expect(periods).toHaveLength(1);
+    expect(periods[0]?.net_monetary_position).toMatchObject({
+      status: "not_computable",
+      reason: { code: "not_applicable" },
+    });
   });
 });
