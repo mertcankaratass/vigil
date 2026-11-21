@@ -4,19 +4,20 @@
  */
 import type { Meta, Quality } from "@vigil/api-types";
 import type { Hono } from "hono";
+import pkg from "../../../../package.json";
 import { loadConfig } from "../config.ts";
 import { type Database, rows } from "../db.ts";
 
 export interface MetaOptions {
   /** DuckDB database instance. If omitted, quarters list is empty. */
   db?: Database;
-  /** Override the app version (default reads root package.json or "0.1.0"). */
+  /** Override the app version (default reads root package.json). */
   appVersion?: string;
   /** Override the config version (default reads config/vigil.json). */
   configVersion?: string;
 }
 
-export const APP_VERSION = "0.1.0";
+export const APP_VERSION = pkg.version;
 
 export async function fetchMeta(options: MetaOptions = {}): Promise<Meta> {
   const app_version = options.appVersion ?? APP_VERSION;
@@ -46,7 +47,7 @@ export async function fetchMeta(options: MetaOptions = {}): Promise<Meta> {
           WHEN r.fact_count = 0 THEN 'no_values'
           WHEN COUNT(CASE WHEN c.severity = 'blocking' AND c.status = 'fail' AND c.known_error IS NULL THEN 1 END) > 0 THEN 'fail'
           WHEN COUNT(CASE WHEN c.known_error IS NOT NULL THEN 1 END) > 0 THEN 'known_error'
-          WHEN COUNT(CASE WHEN c.status = 'pass' THEN 1 END) > 0 THEN 'pass'
+          WHEN COUNT(CASE WHEN c.severity = 'blocking' AND c.status = 'pass' THEN 1 END) > 0 THEN 'pass'
           ELSE 'not_checked'
         END AS quality
       FROM reports r
