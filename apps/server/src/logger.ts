@@ -29,6 +29,8 @@ export interface LoggerOptions {
   module?: string;
   /** Also write to console (useful in dev/tests). Default: false. */
   console?: boolean;
+  /** List of configured secret values (e.g. API keys) to redact in logs. */
+  secrets?: string[];
 }
 
 const LEVEL_PRIORITY: Record<LogLevel, number> = {
@@ -38,28 +40,36 @@ const LEVEL_PRIORITY: Record<LogLevel, number> = {
   error: 3,
 };
 
-const SECRET_KEY_REGEX = /(?:api[_-]?key|token|secret|password|auth(?:orization)?|bearer)/i;
-const SECRET_VALUE_REGEX = /(?:Bearer\s+[A-Za-z0-9._~+/-]+=*|sk-[A-Za-z0-9_-]{10,}|gh[op]_[A-Za-z0-9]{20,})/gi;
+const SECRET_KEY_REGEX =
+  /^(?:api[_-]?key|token|(?:access|refresh|id|auth)[_-]?token|secret|client[_-]?secret|password|passwd|auth(?:orization)?|bearer)$/i;
+const SECRET_VALUE_REGEX =
+  /(?:Bearer\s+[A-Za-z0-9._~+/-]+=*|sk-[A-Za-z0-9_-]{10,}|gsk_[A-Za-z0-9_-]{10,}|AIza[0-9A-Za-z-_]{20,}|gh[op]_[A-Za-z0-9]{20,})/gi;
 const HOME_PATH_REGEX = /(?:[A-Za-z]:\\Users\\[^\\]+|\/(?:Users|home)\/[^/]+)/gi;
 
 /** Redacts secrets, tokens, passwords and user home paths. */
-export function sanitize(value: unknown): unknown {
+export function sanitize(value: unknown, secrets: string[] = []): unknown {
   if (value === null || value === undefined) return value;
 
   if (typeof value === "string") {
-    return value.replace(SECRET_VALUE_REGEX, "[REDACTED_SECRET]").replace(HOME_PATH_REGEX, "[HOME]");
+    let result = value;
+    for (const secret of secrets) {
+      if (secret && secret.length > 0) {
+        result = result.replaceAll(secret, "[REDACTED_SECRET]");
+      }
+    }
+    return result.replace(SECRET_VALUE_REGEX, "[REDACTED_SECRET]").replace(HOME_PATH_REGEX, "[HOME]");
   }
 
   if (value instanceof Error) {
     return {
       name: value.name,
-      message: sanitize(value.message),
-      stack: value.stack ? sanitize(value.stack) : undefined,
+      message: sanitize(value.message, secrets),
+      stack: value.stack ? sanitize(value.stack, secrets) : undefined,
     };
   }
 
   if (Array.isArray(value)) {
-    return value.map(sanitize);
+    return value.map((item) => sanitize(item, secrets));
   }
 
   if (typeof value === "object") {
@@ -68,7 +78,7 @@ export function sanitize(value: unknown): unknown {
       if (SECRET_KEY_REGEX.test(k)) {
         sanitizedObj[k] = "[REDACTED]";
       } else {
-        sanitizedObj[k] = sanitize(v);
+        sanitizedObj[k] = sanitize(v, secrets);
       }
     }
     return sanitizedObj;
@@ -84,6 +94,7 @@ export class Logger {
   readonly minLevel: LogLevel;
   readonly module: string;
   readonly console: boolean;
+  readonly secrets: string[];
 
   constructor(options: LoggerOptions = {}) {
     this.logPath = options.logPath ?? null;
@@ -92,6 +103,7 @@ export class Logger {
     this.minLevel = options.minLevel ?? "info";
     this.module = options.module ?? "root";
     this.console = options.console ?? false;
+    this.secrets = (options.secrets ?? []).filter((s): s is string => typeof s === "string" && s.trim().length > 0);
 
     if (this.logPath) {
       mkdirSync(dirname(this.logPath), { recursive: true });
@@ -106,6 +118,7 @@ export class Logger {
       minLevel: this.minLevel,
       module: moduleName,
       console: this.console,
+      secrets: this.secrets,
     });
   }
 
@@ -120,16 +133,18 @@ export class Logger {
       const stats = statSync(logPath);
       if (stats.size + newBytes <= this.maxBytes) return;
 
-      // Rotate existing backups: .maxFiles - 1 -> delete, .i -> .(i+1)
+      // Delete the oldest backup file if it exists
+      const oldestBackup = `${logPath}.${this.maxFiles}`;
+      if (existsSync(oldestBackup)) {
+        rmSync(oldestBackup, { force: true });
+      }
+
+      // Shift existing backups: .i -> .(i+1) for i = maxFiles - 1 down to 1
       for (let i = this.maxFiles - 1; i >= 1; i--) {
         const oldFile = `${logPath}.${i}`;
         const nextFile = `${logPath}.${i + 1}`;
         if (existsSync(oldFile)) {
-          if (i === this.maxFiles - 1) {
-            rmSync(oldFile, { force: true });
-          } else {
-            renameSync(oldFile, nextFile);
-          }
+          renameSync(oldFile, nextFile);
         }
       }
 
@@ -144,8 +159,9 @@ export class Logger {
     if (!this.shouldLog(level)) return;
 
     const time = new Date().toISOString();
-    const cleanMessage = String(sanitize(message));
-    const cleanDetails = details !== undefined ? (sanitize(details) as Record<string, unknown>) : undefined;
+    const cleanMessage = String(sanitize(message, this.secrets));
+    const cleanDetails =
+      details !== undefined ? (sanitize(details, this.secrets) as Record<string, unknown>) : undefined;
 
     const entry: LogEntry = {
       level,

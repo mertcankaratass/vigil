@@ -37,7 +37,7 @@ describe("Logger (#196)", () => {
     expect(new Date(parsed.time).getTime()).toBeGreaterThan(0);
   });
 
-  test("rotates log files when size limit is exceeded", () => {
+  test("rotates log files keeping exactly maxFiles backups when size limit is exceeded", () => {
     // Small limit to trigger rotation quickly
     const logger = new Logger({
       logPath: logFile,
@@ -46,46 +46,66 @@ describe("Logger (#196)", () => {
       module: "rotate-test",
     });
 
-    for (let i = 0; i < 10; i++) {
-      logger.info(`Message number ${i} to fill bytes`);
+    for (let i = 0; i < 30; i++) {
+      logger.info(`Message number ${i} to fill bytes and trigger rotation`);
     }
 
     expect(existsSync(logFile)).toBe(true);
     expect(existsSync(`${logFile}.1`)).toBe(true);
+    expect(existsSync(`${logFile}.2`)).toBe(true);
+    expect(existsSync(`${logFile}.3`)).toBe(true);
+    expect(existsSync(`${logFile}.4`)).toBe(false);
 
-    // Ensure rotated backup file contains valid JSON lines
-    const backupContent = readFileSync(`${logFile}.1`, "utf-8");
-    const lines = backupContent.trim().split("\n");
-    expect(lines.length).toBeGreaterThan(0);
-    expect(lines[0]).toBeDefined();
-    expect(() => JSON.parse(lines[0] ?? "")).not.toThrow();
+    // Ensure rotated backup files contain valid JSON lines
+    for (const f of [`${logFile}.1`, `${logFile}.2`, `${logFile}.3`]) {
+      const backupContent = readFileSync(f, "utf-8");
+      const lines = backupContent.trim().split("\n");
+      expect(lines.length).toBeGreaterThan(0);
+      expect(() => JSON.parse(lines[0] ?? "")).not.toThrow();
+    }
   });
 
-  test("redacts API keys, bearer tokens, passwords and personal paths", () => {
-    const logger = new Logger({ logPath: logFile, module: "security" });
+  test("redacts API keys, bearer tokens, passwords, personal paths, and keeps harmless fields", () => {
+    const customSecret = "super-secret-custom-key-123";
+    const logger = new Logger({
+      logPath: logFile,
+      module: "security",
+      secrets: [customSecret],
+    });
 
-    logger.error("Failed to connect with secret", {
+    logger.error(`Failed to connect with secret ${customSecret}`, {
       api_key: "sk-ant-live-supersecret123456",
+      gemini_key_in_msg: "AIzaSyA_test_123456789012345678901234",
+      groq_key_in_msg: "gsk_test1234567890abcdef1234567890",
       token: "secret-token-value",
       password: "adminpassword",
       authorization: "Bearer my-jwt-token-xyz12345",
       path: "C:\\Users\\admin\\data\\file.json",
       normal_info: "safe-value",
+      author: "Jane Doe",
+      token_count: 120,
     });
 
     const content = readFileSync(logFile, "utf-8");
+    expect(content).not.toContain(customSecret);
     expect(content).not.toContain("sk-ant-live");
+    expect(content).not.toContain("AIzaSyA_test");
+    expect(content).not.toContain("gsk_test123456");
     expect(content).not.toContain("secret-token-value");
     expect(content).not.toContain("adminpassword");
     expect(content).not.toContain("my-jwt-token-xyz12345");
     expect(content).not.toContain("C:\\Users\\admin");
 
     const parsed = JSON.parse(content.trim());
+    expect(parsed.message).toContain("[REDACTED_SECRET]");
     expect(parsed.details.api_key).toBe("[REDACTED]");
     expect(parsed.details.token).toBe("[REDACTED]");
     expect(parsed.details.password).toBe("[REDACTED]");
     expect(parsed.details.authorization).toBe("[REDACTED]");
     expect(parsed.details.normal_info).toBe("safe-value");
+    // Harmless fields must not be redacted
+    expect(parsed.details.author).toBe("Jane Doe");
+    expect(parsed.details.token_count).toBe(120);
   });
 
   test("sanitize utility function handles nested objects and errors", () => {
