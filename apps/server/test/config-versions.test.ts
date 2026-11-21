@@ -59,9 +59,11 @@ describe("config_versions (#187)", () => {
     instance.closeSync();
   });
 
-  test("connect stores active config at startup if new", async () => {
+  test("storeActiveConfig stores active config if new", async () => {
     const db = await connect(":memory:");
     try {
+      const res = await storeActiveConfig(db);
+      expect(res.stored).toBe(true);
       const versions = await storedConfigVersions(db);
       expect(versions).toHaveLength(1);
       const active = versions[0];
@@ -78,6 +80,7 @@ describe("config_versions (#187)", () => {
   test("reconnecting or re-storing the same config does not duplicate or overwrite", async () => {
     const dbPath = join(dir, "test.duckdb");
     const db1 = await connect(dbPath);
+    await storeActiveConfig(db1);
     const versions1 = await storedConfigVersions(db1);
     expect(versions1).toHaveLength(1);
     const created1 = versions1[0]?.created_at;
@@ -97,10 +100,34 @@ describe("config_versions (#187)", () => {
     }
   });
 
+  test("reformatting file (whitespace, key order) under same version produces identical canonical hash and does not throw", async () => {
+    const db = await connect(":memory:");
+    try {
+      const text = readFileSync(DEFAULT_CONFIG_PATH, "utf8");
+      await storeConfigVersion(db, text, CONFIG.version);
+
+      // Reformat: reverse key order, use 4-space indentation, trailing newlines
+      const parsed = JSON.parse(text);
+      const reversed: Record<string, unknown> = {};
+      for (const k of Object.keys(parsed).reverse()) {
+        reversed[k] = parsed[k];
+      }
+      const reformattedText = `${JSON.stringify(reversed, null, 4)}\n\n`;
+
+      // Should not throw and return stored: false with identical hash
+      const res = await storeConfigVersion(db, reformattedText, CONFIG.version);
+      expect(res.stored).toBe(false);
+      expect(res.hash).toBe(configHash(text));
+    } finally {
+      close(db);
+    }
+  });
+
   test("changing a threshold requires bumping version; same version with different content throws ConfigError", async () => {
     const db = await connect(":memory:");
     try {
       const text = readFileSync(DEFAULT_CONFIG_PATH, "utf8");
+      await storeActiveConfig(db);
       const modified = JSON.parse(text);
       modified.s1_gross_margin.x_min_abs_delta_bps = 5000;
       const modifiedText = JSON.stringify(modified, null, 2);
@@ -115,6 +142,7 @@ describe("config_versions (#187)", () => {
   test("changing a threshold creates a new version and old findings keep the old one", async () => {
     const db = await connect(":memory:");
     try {
+      await storeActiveConfig(db);
       await loadFiling(db, katmrFromGolden());
 
       // 1. Finding computed and stored under initial config version

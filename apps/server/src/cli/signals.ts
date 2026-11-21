@@ -18,7 +18,7 @@ import {
   parseKapXls,
   type SignalObject,
 } from "@vigil/core";
-import { loadConfig } from "../config.ts";
+import { loadConfig, storeActiveConfig } from "../config.ts";
 import { close, connect, kapFiles } from "../db.ts";
 import { writeFindings } from "../findings-store.ts";
 
@@ -103,6 +103,7 @@ for (const item of s3) {
 if (dbPath) {
   const db = await connect(dbPath);
   try {
+    await storeActiveConfig(db);
     const w = await writeFindings(db, disclosures, [...s1, ...s2, ...s3], { configVersion: config.version });
     console.log(`
 Findings in ${dbPath}: ${w.added} new, ${w.kept} found again, ${w.removed} no longer found`);

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ConfigError, parseConfig, type VigilConfig } from "@vigil/core";
-import type { Database } from "./db.ts";
+import { type Database, rows } from "./db.ts";
 
 export interface StoredConfigVersion {
   version: string;
@@ -34,9 +34,31 @@ export function loadConfig(path = configPath()): VigilConfig {
   return parseConfig(text, path);
 }
 
-/** SHA-256 hash of configuration text, hex. */
-export function configHash(text: string): string {
-  return createHash("sha256").update(text).digest("hex");
+/** Canonical JSON representation with recursively sorted keys, independent of whitespace. */
+export function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  const sortedKeys = Object.keys(obj).sort();
+  const entries = sortedKeys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`);
+  return `{${entries.join(",")}}`;
+}
+
+/** SHA-256 hash of configuration canonical form, hex. */
+export function configHash(textOrObj: unknown): string {
+  if (typeof textOrObj === "string") {
+    try {
+      const parsed = JSON.parse(textOrObj);
+      return createHash("sha256").update(canonicalJson(parsed)).digest("hex");
+    } catch {
+      return createHash("sha256").update(textOrObj).digest("hex");
+    }
+  }
+  return createHash("sha256").update(canonicalJson(textOrObj)).digest("hex");
 }
 
 /**
@@ -68,10 +90,7 @@ export async function storeConfigVersion(
   options: { now?: Date } = {},
 ): Promise<{ stored: boolean; version: string; hash: string }> {
   const hash = configHash(text);
-  const reader = await db.con.runAndReadAll("SELECT content_hash, content FROM config_versions WHERE version = $1", [
-    version,
-  ] as never);
-  const existing = reader.getRowObjectsJS() as { content_hash: string; content: string }[];
+  const existing = await rows(db, "SELECT content_hash, content FROM config_versions WHERE version = $1", [version]);
   if (existing.length > 0) {
     const row = existing[0];
     if (row && row.content_hash !== hash) {
@@ -91,8 +110,9 @@ export async function storeConfigVersion(
 
 /** All stored configuration versions ordered by creation time. */
 export async function storedConfigVersions(db: Database): Promise<StoredConfigVersion[]> {
-  const reader = await db.con.runAndReadAll(
+  const result = await rows(
+    db,
     "SELECT version, content_hash, content, created_at FROM config_versions ORDER BY created_at",
   );
-  return reader.getRowObjectsJS() as unknown as StoredConfigVersion[];
+  return result as unknown as StoredConfigVersion[];
 }
