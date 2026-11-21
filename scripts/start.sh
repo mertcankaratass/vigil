@@ -74,7 +74,7 @@ done
 if [ "$READY" = true ]; then
   echo "Vigil hazir / Vigil is ready: $APP_URL"
 else
-  echo "Servis yanit veriyor, tarayici aciliyor / Opening browser..."
+  echo "Servis henuz hazir degil, yine de tarayici aciliyor / Service is not ready yet, opening browser..."
 fi
 
 # Open browser on macOS and Linux

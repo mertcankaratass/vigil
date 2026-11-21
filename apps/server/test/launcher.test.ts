@@ -33,5 +33,6 @@ describe("macOS and Linux launcher (#264)", () => {
     const script = readFileSync(startShPath, "utf-8");
     expect(script).toContain("Darwin");
     expect(script).toContain("xdg-open");
+    expect(script).toContain("Service is not ready yet");
   });
 });
