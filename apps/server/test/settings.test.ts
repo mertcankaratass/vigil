@@ -60,10 +60,15 @@ describe("Settings (#195)", () => {
     expect((apiSettings.llm as unknown as Record<string, unknown>).api_key).toBeUndefined();
   });
 
-  test("rejects attempts to configure KAP request rate (decision 0008)", () => {
-    expect(() => validateSettings({ kap_rate: 10 })).toThrow(SettingsError);
-    expect(() => validateSettings({ kap_delay: 500 })).toThrow(/decision 0008/);
-    expect(() => validateSettings({ request_rate: 2 })).toThrow(/decision 0008/);
+  test("rejects unknown keys using strict allowlist (decision 0008, #195)", () => {
+    expect(() => validateSettings({ kap_requests_per_second: 5 })).toThrow(/kap_requests_per_second/);
+    expect(() => validateSettings({ kap_rate: 10 })).toThrow(/kap_rate/);
+    expect(() => validateSettings({ custom_setting: "test" })).toThrow(/custom_setting/);
+    expect(() =>
+      validateSettings({
+        llm: { provider: "anthropic", model: "claude-3-haiku", temperature: 0.5 },
+      }),
+    ).toThrow(/temperature/);
   });
 
   test("rejects invalid JSON or non-object structures", () => {

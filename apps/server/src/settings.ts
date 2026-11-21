@@ -2,7 +2,7 @@
  * Settings file schema, defaults and validation (#195, decision 0008).
  * Stored as JSON in the data volume. KAP polite-access rules cannot be configured.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LlmProvider, Settings } from "@vigil/api-types";
 
@@ -40,6 +40,10 @@ export function defaultSettingsPath(dataDir = DEFAULT_DATA_DIR): string {
   return join(dataDir, DEFAULT_SETTINGS_FILE);
 }
 
+export const ALLOWED_SETTINGS_KEYS: ReadonlySet<string> = new Set(["data_dir", "quarters", "llm"]);
+
+export const ALLOWED_LLM_KEYS: ReadonlySet<string> = new Set(["provider", "model", "base_url", "api_key"]);
+
 const QUARTER_REGEX = /^(\d{4})[-_]([1-4])$/;
 
 export function validateSettings(raw: unknown): StoredSettings {
@@ -49,13 +53,10 @@ export function validateSettings(raw: unknown): StoredSettings {
 
   const obj = raw as Record<string, unknown>;
 
-  // KAP polite-access rules cannot be configured (decision 0008, #195)
-  const forbiddenKeys = ["kap_rate", "kap_delay", "request_rate", "rate_limit", "kap_interval"];
-  for (const k of forbiddenKeys) {
-    if (k in obj) {
-      throw new SettingsError(
-        `KAP erişim kuralları değiştirilemez (KAP request rate cannot be changed, decision 0008): '${k}'`,
-      );
+  // Reject unknown keys (strict allowlist, decision 0008, #195)
+  for (const k of Object.keys(obj)) {
+    if (!ALLOWED_SETTINGS_KEYS.has(k)) {
+      throw new SettingsError(`Bilinmeyen ayar anahtarı (Unknown setting key): '${k}'.`);
     }
   }
 
@@ -91,6 +92,12 @@ export function validateSettings(raw: unknown): StoredSettings {
       throw new SettingsError("llm bir nesne veya null olmalıdır (llm must be an object or null).");
     }
     const llmObj = obj.llm as Record<string, unknown>;
+
+    for (const k of Object.keys(llmObj)) {
+      if (!ALLOWED_LLM_KEYS.has(k)) {
+        throw new SettingsError(`Bilinmeyen LLM ayar anahtarı (Unknown LLM setting key): '${k}'.`);
+      }
+    }
 
     const provider = llmObj.provider as LlmProvider;
     if (!VALID_PROVIDERS.includes(provider)) {
@@ -177,10 +184,29 @@ export function readSettings(path = defaultSettingsPath()): StoredSettings {
   return validateSettings(parsed);
 }
 
-/** Validates and writes settings to file. Creates parent directories if needed. */
+/** Validates and writes settings atomically to file with mode 0600. Creates parent directories if needed. */
 export function writeSettings(path: string, settings: unknown): StoredSettings {
   const validated = validateSettings(settings);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(validated, null, 2), "utf-8");
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true });
+  const tempPath = `${path}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    writeFileSync(tempPath, JSON.stringify(validated, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+    try {
+      chmodSync(tempPath, 0o600);
+    } catch {}
+    renameSync(tempPath, path);
+    try {
+      chmodSync(path, 0o600);
+    } catch {}
+  } catch (err) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {}
+    throw err;
+  }
   return validated;
 }
