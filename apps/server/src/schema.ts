@@ -289,6 +289,19 @@ export interface Migration {
 }
 
 /**
+ * Migration 9 (#187): configuration versions stored with their content hash.
+ * A finding records which config version produced it; changing thresholds creates a new version.
+ */
+export const CONFIG_VERSIONS_SQL = `
+CREATE TABLE config_versions (
+    version         VARCHAR PRIMARY KEY,      -- VigilConfig.version, e.g. '2026-11-01'
+    content_hash    VARCHAR NOT NULL,         -- SHA-256 of the configuration file's text, hex
+    content         VARCHAR NOT NULL,         -- JSON text of the configuration file
+    created_at      TIMESTAMP NOT NULL        -- UTC, when this version was first stored
+);
+`;
+
+/**
  * Ordered schema changes (#182). Append only: never edit or reorder a released step. Each runs once, in its own
  * transaction, and is recorded in `schema_version`. Steps must also be safe on databases created before
  * versioning existed (2026), which have no `schema_version` table; `IF NOT EXISTS` covers that.
@@ -324,6 +337,7 @@ ALTER TABLE companies ADD COLUMN IF NOT EXISTS search_key VARCHAR;
   { version: 6, name: "metrics and metric_inputs (#184)", sql: METRICS_SQL },
   { version: 7, name: "findings (#185)", sql: FINDINGS_SQL },
   { version: 8, name: "finding_steps and finding_inputs (#186)", sql: FINDING_STEPS_SQL },
+  { version: 9, name: "config_versions (#187)", sql: CONFIG_VERSIONS_SQL },
 ];
 
 export const SCHEMA_VERSION_SQL = `

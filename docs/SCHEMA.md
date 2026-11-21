@@ -183,6 +183,20 @@ Every step of a finding's calculation (`docs/API.md` "Calculation", #72), stored
 - KATMR's S1 is 7 steps, 4 of them inputs: rows 5 and 3, columns 6 and 7 of `general_role_310003`. (189,492,068 / 879,599,263 − 330,145,727 / 694,991,758) × 10,000 = −2,596 bps.
 - On 2026/2 the 57 findings have 507 steps and 349 inputs, and every one reads back equal to what the rule produced.
 
+### `config_versions` — thresholds and definitions in force (#187)
+
+The configuration file (`config/vigil.json`, #69) stored with its version and hash. When thresholds change, bumping `version` creates a new row; old findings keep the version they were found under.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `version` | VARCHAR, PK | Version name from the configuration file (`version`) |
+| `content_hash` | VARCHAR | SHA-256 of the configuration file's text, hex |
+| `content` | VARCHAR | JSON text of the configuration file |
+| `created_at` | TIMESTAMP | UTC, when this version was first stored |
+
+- Stored at startup if new. Changing a threshold creates a new version; running the rules under a new version keeps findings stored under earlier versions.
+- Code: [`apps/server/src/config.ts`](../apps/server/src/config.ts).
+
 
 ## Fact identity
 
@@ -365,6 +379,7 @@ WHERE c.severity = 'blocking' AND c.status = 'fail';
 | 6 | `metrics`, `metric_inputs` (#184) |
 | 7 | `findings` (#185) |
 | 8 | `finding_steps`, `finding_inputs`, `findings.calculation_formula` and `definition_id` (#186); findings stored before it have no steps until the rules run again |
+| 9 | `config_versions` (#187) |
 
 ## CPI series
 
