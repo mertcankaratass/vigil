@@ -41,7 +41,7 @@ const LEVEL_PRIORITY: Record<LogLevel, number> = {
 };
 
 const SECRET_KEY_REGEX =
-  /^(?:api[_-]?key|token|(?:access|refresh|id|auth)[_-]?token|secret|client[_-]?secret|password|passwd|auth(?:orization)?|bearer)$/i;
+  /(?:^|[_-])(?:api[_-]?key|token|(?:access|refresh|id|auth)[_-]?token|secret|client[_-]?secret|password|passwd|auth(?:orization)?|bearer)$/i;
 const SECRET_VALUE_REGEX =
   /(?:Bearer\s+[A-Za-z0-9._~+/-]+=*|sk-[A-Za-z0-9_-]{10,}|gsk_[A-Za-z0-9_-]{10,}|AIza[0-9A-Za-z-_]{20,}|gh[op]_[A-Za-z0-9]{20,})/gi;
 const HOME_PATH_REGEX = /(?:[A-Za-z]:\\Users\\[^\\]+|\/(?:Users|home)\/[^/]+)/gi;

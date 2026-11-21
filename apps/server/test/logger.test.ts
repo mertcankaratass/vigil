@@ -75,6 +75,8 @@ describe("Logger (#196)", () => {
 
     logger.error(`Failed to connect with secret ${customSecret}`, {
       api_key: "sk-ant-live-supersecret123456",
+      gemini_api_key: "custom_gemini_val",
+      "x-api-key": "custom_header_val",
       gemini_key_in_msg: "AIzaSyA_test_123456789012345678901234",
       groq_key_in_msg: "gsk_test1234567890abcdef1234567890",
       token: "secret-token-value",
@@ -99,6 +101,8 @@ describe("Logger (#196)", () => {
     const parsed = JSON.parse(content.trim());
     expect(parsed.message).toContain("[REDACTED_SECRET]");
     expect(parsed.details.api_key).toBe("[REDACTED]");
+    expect(parsed.details.gemini_api_key).toBe("[REDACTED]");
+    expect(parsed.details["x-api-key"]).toBe("[REDACTED]");
     expect(parsed.details.token).toBe("[REDACTED]");
     expect(parsed.details.password).toBe("[REDACTED]");
     expect(parsed.details.authorization).toBe("[REDACTED]");
