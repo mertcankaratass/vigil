@@ -10,9 +10,11 @@ const composePath = join(import.meta.dir, "../../../docker-compose.yml");
 const content = readFileSync(composePath, "utf-8");
 
 describe("docker-compose.yml", () => {
-  test("services are defined", () => {
+  test("services are defined with graceful shutdown and internal api url", () => {
     expect(content).toContain("server:");
     expect(content).toContain("web:");
+    expect(content).toContain("stop_grace_period: 40s");
+    expect(content).toContain("VIGIL_API_URL=http://server:8787");
   });
 
   test("ports are strictly bound to 127.0.0.1 and not accessible from outside", () => {

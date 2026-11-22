@@ -10,6 +10,7 @@ services:
       context: .
       dockerfile: apps/server/Dockerfile
     restart: unless-stopped
+    stop_grace_period: 40s
     ports:
       - "127.0.0.1:8787:8787"
     environment:
@@ -39,6 +40,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
+      - VIGIL_API_URL=http://server:8787
       - NEXT_PUBLIC_API_URL=http://127.0.0.1:8787
       - NODE_ENV=production
     depends_on:
